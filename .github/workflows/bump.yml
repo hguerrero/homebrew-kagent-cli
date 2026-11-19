@@ -1,0 +1,45 @@
+name: Bump formula
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to package (defaults to latest stable)"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      # Pushes and PRs made with the default GITHUB_TOKEN do not trigger other
+      # workflows. Set a BUMP_TOKEN secret (PAT) so the brew test-bot checks run
+      # on the bump PR.
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.BUMP_TOKEN || github.token }}
+      - name: Update formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/bump.sh "${{ inputs.tag }}"
+      - name: Open PR if changed
+        env:
+          GH_TOKEN: ${{ secrets.BUMP_TOKEN || github.token }}
+        run: |
+          if git diff --quiet; then
+            echo "Formula already up to date"
+            exit 0
+          fi
+          version="$(sed -n 's#.*download/v\([^/]*\)/.*#\1#p' Formula/kagent-cli.rb | head -1)"
+          branch="bump-kagent-cli-${version}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -am "kagent-cli ${version}"
+          git push -u origin "$branch"
+          gh pr create --title "kagent-cli ${version}" --body "Automated bump to v${version}." --base main
